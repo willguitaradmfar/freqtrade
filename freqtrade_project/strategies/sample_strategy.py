@@ -6,6 +6,7 @@ import sys
 import os
 import logging
 from datetime import datetime
+import json
 from typing import Dict, List, Optional, Any
 
 from freqtrade.strategy import IStrategy
@@ -37,7 +38,7 @@ except Exception as e:
 LLM_CLIENT_AVAILABLE = False
 try:
     if os.path.exists(os.path.join(utils_dir, 'llm_client.py')):
-        from utils.llm_client import LLMClient, encode_image_to_base64, OPENAI_AVAILABLE as LLM_CLIENT_AVAILABLE
+        from utils.llm_client import LLMClient, OPENAI_AVAILABLE as LLM_CLIENT_AVAILABLE
         logger.info("LLM client module loaded successfully")
     else:
         logger.warning("llm_client.py not found in utils directory")
@@ -112,14 +113,26 @@ class SampleStrategy(IStrategy):
         # Dictionary to store custom stop loss and take profit values
         self.custom_sl_tp = {}
 
+    def bollinger_bands(self, dataframe: DataFrame) -> DataFrame:
+        """Calculate Bollinger Bands"""
+        dataframe['bb_upper'], dataframe['bb_middle'], dataframe['bb_lower'] = ta.BBANDS(
+            dataframe['close'],
+            timeperiod=20,
+            nbdevup=2.0,
+            nbdevdn=2.0,
+            matype=0
+        )
+        return dataframe
+
     def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         """Calculate indicators and generate chart for analysis"""
         pair = metadata['pair']
         
-        # Calculate basic indicators
-        dataframe['sma_9'] = ta.SMA(dataframe, timeperiod=9)
-        dataframe['sma_21'] = ta.SMA(dataframe, timeperiod=21)
         dataframe['rsi'] = ta.RSI(dataframe, timeperiod=14)
+
+        # Medias moveis exponenciais
+        dataframe['ema_9'] = ta.EMA(dataframe, timeperiod=9)
+        dataframe['ema_21'] = ta.EMA(dataframe, timeperiod=21)
         
         # Calculate MACD - Fix: MACD returns tuple of arrays, not a dictionary
         macd, macdsignal, macdhist = ta.MACD(dataframe['close'])
@@ -127,22 +140,27 @@ class SampleStrategy(IStrategy):
         dataframe['macdsignal'] = macdsignal
         dataframe['macdhist'] = macdhist
         
+        # Bollinger Bands
+        dataframe = self.bollinger_bands(dataframe)
+        
         # Generate chart image for LLM analysis
-        chart_image_path = None
+        chart_emas_result = None
+        chart_bollinger_result = None
         if self.process_only_new_candles and not dataframe.empty and PLOT_CANDLES_AVAILABLE:
             try:
                 logger.info(f"Generating chart for {pair}")
                 
                 # Plot candles with indicators
-                chart_image_path = plot_candles.plot_last_candles(
+                chart_emas_result = plot_candles.plot_last_candles(
                     pair=pair,
+                    sulfix_filename='emas',
                     dataframe=dataframe,
                     timeframe=self.timeframe,
                     num_candles=50,
                     output_dir=self.absolute_plot_dir,
                     indicators=[
-                        {'name': 'sma_9', 'color': 'red', 'panel': 0, 'width': 1.5, 'type': 'line'},
-                        {'name': 'sma_21', 'color': 'blue', 'panel': 0, 'width': 1.5, 'type': 'line'},
+                        {'name': 'ema_9', 'color': 'red', 'panel': 0, 'width': 1.5, 'type': 'line'},
+                        {'name': 'ema_21', 'color': 'blue', 'panel': 0, 'width': 1.5, 'type': 'line'},
                     ],
                     indicators_below=[
                         {'name': 'rsi', 'color': 'purple', 'width': 1.0, 'type': 'line'},
@@ -151,14 +169,63 @@ class SampleStrategy(IStrategy):
                         {'name': 'macdhist', 'color': 'green', 'width': 0.8, 'panel': 'MACD', 'type': 'bar'},
                     ],
                     title=f"{pair} - {self.timeframe}",
+                    subtitle=f"Moving Average Exponencial 9 e 21, Convergence Divergence (MACD) e Relative Strength Index (RSI)",
+                    question=f"What is the trend for {pair} in the {self.timeframe} timeframe? What is the trend for the EMA 9 and EMA 21?"
+                )
+
+                chart_bollinger_result = plot_candles.plot_last_candles(
+                    pair=pair,
+                    sulfix_filename='bollinger',
+                    dataframe=dataframe,
+                    timeframe=self.timeframe,
+                    num_candles=50,
+                    output_dir=self.absolute_plot_dir,
+                    indicators=[
+                        {'name': 'bb_upper', 'color': 'red', 'panel': 0, 'width': 1.5, 'type': 'line'},
+                        {'name': 'bb_middle', 'color': 'blue', 'panel': 0, 'width': 1.5, 'type': 'line'},
+                        {'name': 'bb_lower', 'color': 'green', 'panel': 0, 'width': 1.5, 'type': 'line'},
+                    ],
+                    indicators_below=[
+                        {'name': 'rsi', 'color': 'purple', 'width': 1.0, 'type': 'line'},
+                        {'name': 'macd', 'color': 'blue', 'width': 1.5, 'panel': 'MACD', 'type': 'line'},
+                        {'name': 'macdsignal', 'color': 'red', 'width': 1.0, 'panel': 'MACD', 'type': 'line'},
+                        {'name': 'macdhist', 'color': 'green', 'width': 0.8, 'panel': 'MACD', 'type': 'bar'},
+                    ],
+                    title=f"{pair} - {self.timeframe}",
+                    subtitle=f"Bollinger Bands 20, 2 desvios padrao, Media Movel Exponencial 9 e 21, Convergence Divergence (MACD) e Relative Strength Index (RSI)",
+                    question=f"What is the trend for {pair} in the {self.timeframe} timeframe? What is the trend for the Bollinger Bands?"
                 )
                 
-                if chart_image_path:
-                    logger.info(f"Chart generated: {chart_image_path}")
+                # Get LLM analysis if charts were created and client is available
+                if (chart_emas_result or chart_bollinger_result) and self.llm_client and LLM_CLIENT_AVAILABLE:
+                    # Create a list of all chart images to analyze
+                    chart_images = []
+                    chart_base64_images = []
                     
-                    # Get LLM analysis if client is available
-                    if self.llm_client and LLM_CLIENT_AVAILABLE:
-                        llm_analysis = self.analyze_chart_with_llm(chart_image_path, pair, dataframe)
+                    if chart_emas_result:
+                        if chart_emas_result.get('filepath') and os.path.exists(chart_emas_result['filepath']):
+                            chart_images.append(chart_emas_result['filepath'])
+                            if chart_emas_result.get('base64'):
+                                chart_base64_images.append({
+                                    "path": chart_emas_result['filepath'],
+                                    "base64": chart_emas_result['base64'],
+                                    "question": chart_emas_result['question']
+                                })
+                            logger.info(f"EMA chart generated: {chart_emas_result['filepath']}")
+                            
+                    if chart_bollinger_result:
+                        if chart_bollinger_result.get('filepath') and os.path.exists(chart_bollinger_result['filepath']):
+                            chart_images.append(chart_bollinger_result['filepath'])
+                            if chart_bollinger_result.get('base64'):
+                                chart_base64_images.append({
+                                    "path": chart_bollinger_result['filepath'],
+                                    "base64": chart_bollinger_result['base64'],
+                                    "question": chart_bollinger_result['question']
+                                })
+                            logger.info(f"Bollinger chart generated: {chart_bollinger_result['filepath']}")
+                                
+                    if chart_images and chart_base64_images:
+                        llm_analysis = self.analyze_chart_with_llm(chart_images, chart_base64_images, pair, dataframe)
                         if llm_analysis:
                             # Store analysis for use in signal generation
                             if not hasattr(self, 'llm_analyses'):
@@ -166,28 +233,26 @@ class SampleStrategy(IStrategy):
                             self.llm_analyses[pair] = llm_analysis
                             
                             logger.info(f"LLM analysis for {pair}: {llm_analysis['recommendation']} (confidence: {llm_analysis['confidence']})")
+                    else:
+                        logger.error(f"No chart images available for {pair} to analyze with LLM")
             except Exception as e:
-                logger.error(f"Error in chart generation: {e}")
+                logger.error(f"Error in chart generation: {e}", exc_info=True)
                 
         return dataframe
 
-    def analyze_chart_with_llm(self, image_path: str, pair: str, dataframe: DataFrame) -> Optional[Dict[str, Any]]:
-        """Send chart image to LLM for analysis"""
-        if not self.llm_client or not os.path.exists(image_path):
-            logger.error(f"Cannot analyze chart: {'LLM client not available' if not self.llm_client else f'Image not found: {image_path}'}")
+    def analyze_chart_with_llm(self, image_paths: List[str], image_base64_list: List[Dict[str, str]], pair: str, dataframe: DataFrame) -> Optional[Dict[str, Any]]:
+        """Send chart images to LLM for analysis"""
+        if not self.llm_client or not all(os.path.exists(path) for path in image_paths):
+            missing_paths = [path for path in image_paths if not os.path.exists(path)]
+            logger.error(f"Cannot analyze chart: {'LLM client not available' if not self.llm_client else f'Images not found: {missing_paths}'}")
             return None
             
         try:
-            logger.info(f"🔄 STEP 1: Starting LLM analysis for {pair}")
+            logger.info(f"🔄 STEP 1: Starting LLM analysis for {pair} with {len(image_paths)} images")
             
-            # Encode image to base64
-            logger.info(f"🔄 STEP 2: Encoding image to base64: {image_path}")
-            image_base64 = encode_image_to_base64(image_path)
-            if not image_base64:
-                logger.error(f"❌ Failed to encode image {image_path} to base64")
-                return None
-            logger.info(f"✅ Image encoded successfully: {len(image_base64)} characters")
-                
+            # No need to encode images, as we already have the base64 from plot_candles
+            logger.info(f"🔄 STEP 2: Using pre-encoded images for {len(image_base64_list)} charts")
+            
             # Recent price data for context
             logger.info(f"🔄 STEP 3: Preparing price context for {pair}")
             recent_prices = dataframe.tail(5)[['date', 'close']].to_dict('records')
@@ -202,7 +267,7 @@ class SampleStrategy(IStrategy):
             # System message for LLM
             logger.info(f"🔄 STEP 5: Creating system message for LLM")
             system_content = (
-                "You are a cryptocurrency trading assistant. Analyze the chart image and provide "
+                "You are a cryptocurrency trading assistant. Analyze the chart images and provide "
                 "professional technical analysis. Your response must be a JSON object with the following fields: "
                 "\"analysis\": a brief explanation of your analysis with key indicators and patterns, "
                 "\"trend\": \"bullish\", \"bearish\", or \"neutral\", "
@@ -213,8 +278,8 @@ class SampleStrategy(IStrategy):
             )
             
             # User message with chart and trade context
-            logger.info(f"🔄 STEP 6: Creating user message with chart for {pair}")
-            user_content = f"Analyze this {pair} chart. Recent closing prices: {price_context}\n\n"
+            logger.info(f"🔄 STEP 6: Creating user message with charts for {pair}")
+            user_content = f"Analyze these {pair} charts. Recent closing prices: {price_context}\n\n"
             
             # Add open trade information if available
             if trade_info:
@@ -227,28 +292,37 @@ class SampleStrategy(IStrategy):
                     f"- Stop loss set at: {trade_info['stop_loss_pct']}%\n"
                     f"- Take profit target: {trade_info['take_profit_pct']}%\n\n"
                 )
-                user_content += ("Based on the chart and current open position, provide your analysis and recommendation. "
+                user_content += ("Based on the charts and current open position, provide your analysis and recommendation. "
                                 "If you recommend selling, explain why. If you recommend holding, explain for how much longer and what conditions would change your recommendation.")
             else:
-                user_content += ("No open position currently exists. Based on the chart, provide your analysis and recommendation. "
+                user_content += ("No open position currently exists. Based on the charts, provide your analysis and recommendation. "
                                 "If you recommend buying, explain why and suggest appropriate stop loss and take profit levels.")
                 
             logger.info(f"📝 User message prepared: {user_content}")
             
-            # Format messages for OpenAI API
-            logger.info(f"🔄 STEP 7: Formatting messages for LLM API")
+            # Format messages for OpenAI API with multiple images
+            logger.info(f"🔄 STEP 7: Formatting messages with {len(image_base64_list)} images for LLM API")
+            
+            # Start with text in the content
+            content_list = [{"type": "text", "text": user_content}]
+            
+            # Add all images to content
+            for img in image_base64_list:
+                content_list.append({"type": "text", "text": img['question']})
+                content_list.append(                    
+                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img['base64']}"}}
+                )
+            
             messages = [
                 {"role": "system", "content": system_content},
-                {"role": "user", "content": [
-                    {"type": "text", "text": user_content},
-                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_base64}"}}
-                ]}
+                {"role": "user", "content": content_list}
             ]
             
             # Log the request
             logger.info(f"📤 REQUEST TO LLM:")
             logger.info(f"📤 System content: {system_content}")
             logger.info(f"📤 User content: {user_content}")
+            logger.info(f"📤 Including {len(image_base64_list)} images")
             logger.info(f"📤 Model: {self.llm_model}, Temperature: {self.llm_temperature}")
             
             # Send to LLM
@@ -282,6 +356,29 @@ class SampleStrategy(IStrategy):
                 logger.error(f"❌ LLM response missing required fields: {missing_fields}")
                 return None
             
+            # Save LLM analysis to JSON file with same name as the first chart image but with .json extension
+            logger.info(f"🔄 STEP 10: Saving LLM analysis to JSON file")
+            try:
+                # Create JSON file path from the first image path
+                current_datetime = datetime.now().strftime("%Y%m%d_%H%M")
+                json_file_path = os.path.join(os.path.dirname(image_paths[0]), f"{pair.replace('/', '_')}_{self.timeframe}_{current_datetime}.json")
+                logger.info(f"📄 Saving analysis to: {json_file_path}")
+                
+                # Create a complete record with both request and response
+                json_data = {
+                    "request": messages,
+                    "response": content
+                }
+                
+                # Write the JSON file
+                with open(json_file_path, 'w') as json_file:
+                    json.dump(json_data, json_file, indent=4)
+                    
+                logger.info(f"✅ Analysis saved to JSON file: {json_file_path}")
+            except Exception as e:
+                logger.error(f"❌ Error saving LLM analysis to JSON file: {e}")
+                # Continue even if saving fails
+            
             # Log detailed analysis
             logger.info(f"📈 LLM ANALYSIS FOR {pair}:")
             logger.info(f"   Analysis: {content.get('analysis', 'No analysis provided')}")
@@ -290,7 +387,7 @@ class SampleStrategy(IStrategy):
             logger.info(f"   Recommendation: {content.get('recommendation')}")
             logger.info(f"   Stop Loss: {content.get('stop_loss')}%")
             logger.info(f"   Take Profit: {content.get('take_profit')}%")
-            logger.info(f"✅ STEP 10: Analysis validated and complete for {pair}")
+            logger.info(f"✅ STEP 11: Analysis validated and complete for {pair}")
                 
             return content
                 
@@ -506,58 +603,58 @@ class SampleStrategy(IStrategy):
                 
         return False
 
-    def bot_loop_start(self, **kwargs) -> None:
-        """Log open trade status at the start of each bot loop"""
-        if self.dp.runmode.value in ('backtest', 'hyperopt'):
-            return
+    # def bot_loop_start(self, **kwargs) -> None:
+    #     """Log open trade status at the start of each bot loop"""
+    #     if self.dp.runmode.value in ('backtest', 'hyperopt'):
+    #         return
             
-        try:
-            logger.info(f"ud83dudd04 MONITORING: Checking open trades status")
-            open_trades = Trade.get_trades_proxy(is_open=True)
-            if not open_trades:
-                logger.info("ud83dudcc3 No open trades to monitor")
-                return
+    #     try:
+    #         logger.info(f"ud83dudd04 MONITORING: Checking open trades status")
+    #         open_trades = Trade.get_trades_proxy(is_open=True)
+    #         if not open_trades:
+    #             logger.info("ud83dudcc3 No open trades to monitor")
+    #             return
                 
-            logger.info(f"ud83dudcc8 MONITORING {len(open_trades)} OPEN TRADES:")
+    #         logger.info(f"ud83dudcc8 MONITORING {len(open_trades)} OPEN TRADES:")
             
-            for trade in open_trades:
-                # Get current price
-                try:
-                    current_price = self.dp.ticker(trade.pair)['last']
-                    profit_pct = ((current_price / trade.open_rate) - 1) * 100
-                    time_in_trade = (datetime.now() - trade.open_date).total_seconds() / 3600  # hours
+    #         for trade in open_trades:
+    #             # Get current price
+    #             try:
+    #                 current_price = self.dp.ticker(trade.pair)['last']
+    #                 profit_pct = ((current_price / trade.open_rate) - 1) * 100
+    #                 time_in_trade = (datetime.now() - trade.open_date).total_seconds() / 3600  # hours
                     
-                    logger.info(f"ud83dudd39 {trade.pair}:")
-                    logger.info(f"   Open for: {time_in_trade:.1f} hours")
-                    logger.info(f"   Entry: {trade.open_rate:.4f}, Current: {current_price:.4f}")
-                    logger.info(f"   Profit: {profit_pct:.2f}%")
+    #                 logger.info(f"ud83dudd39 {trade.pair}:")
+    #                 logger.info(f"   Open for: {time_in_trade:.1f} hours")
+    #                 logger.info(f"   Entry: {trade.open_rate:.4f}, Current: {current_price:.4f}")
+    #                 logger.info(f"   Profit: {profit_pct:.2f}%")
                     
-                    if trade.pair in self.custom_sl_tp:
-                        sl_pct = self.custom_sl_tp[trade.pair]['stop_loss_pct']
-                        tp_pct = self.custom_sl_tp[trade.pair]['take_profit_pct']
-                        entry_price = self.custom_sl_tp[trade.pair]['entry_price']
+    #                 if trade.pair in self.custom_sl_tp:
+    #                     sl_pct = self.custom_sl_tp[trade.pair]['stop_loss_pct']
+    #                     tp_pct = self.custom_sl_tp[trade.pair]['take_profit_pct']
+    #                     entry_price = self.custom_sl_tp[trade.pair]['entry_price']
                         
-                        # Calculate distances
-                        sl_price = entry_price * (1 + (sl_pct / 100))
-                        tp_price = entry_price * (1 + (tp_pct / 100))
+    #                     # Calculate distances
+    #                     sl_price = entry_price * (1 + (sl_pct / 100))
+    #                     tp_price = entry_price * (1 + (tp_pct / 100))
                         
-                        sl_distance = ((current_price / sl_price) - 1) * 100
-                        tp_distance = ((tp_price / current_price) - 1) * 100
+    #                     sl_distance = ((current_price / sl_price) - 1) * 100
+    #                     tp_distance = ((tp_price / current_price) - 1) * 100
                         
-                        logger.info(f"   SL: {sl_pct:.2f}% ({sl_price:.4f}), {sl_distance:.2f}% away")
-                        logger.info(f"   TP: {tp_pct:.2f}% ({tp_price:.4f}), {tp_distance:.2f}% away")
+    #                     logger.info(f"   SL: {sl_pct:.2f}% ({sl_price:.4f}), {sl_distance:.2f}% away")
+    #                     logger.info(f"   TP: {tp_pct:.2f}% ({tp_price:.4f}), {tp_distance:.2f}% away")
                         
-                        # Risk assessment
-                        if sl_distance < 1.0:
-                            logger.warning(f"u26a0ufe0f {trade.pair} is CLOSE TO STOP LOSS (only {sl_distance:.2f}% away)")
-                        if tp_distance < 1.0:
-                            logger.info(f"ud83dudd34 {trade.pair} is CLOSE TO TAKE PROFIT (only {tp_distance:.2f}% away)")
-                    else:
-                        logger.info(f"   No custom SL/TP defined - using strategy defaults")
+    #                     # Risk assessment
+    #                     if sl_distance < 1.0:
+    #                         logger.warning(f"u26a0ufe0f {trade.pair} is CLOSE TO STOP LOSS (only {sl_distance:.2f}% away)")
+    #                     if tp_distance < 1.0:
+    #                         logger.info(f"ud83dudd34 {trade.pair} is CLOSE TO TAKE PROFIT (only {tp_distance:.2f}% away)")
+    #                 else:
+    #                     logger.info(f"   No custom SL/TP defined - using strategy defaults")
                     
-                except Exception as e:
-                    logger.error(f"u274c Error getting price data for {trade.pair}: {e}")
+    #             except Exception as e:
+    #                 logger.error(f"u274c Error getting price data for {trade.pair}: {e}")
             
-            logger.info("ud83dudd04 MONITORING complete")
-        except Exception as e:
-            logger.error(f"u274c Error in bot_loop_start monitoring: {e}", exc_info=True)
+    #         logger.info("ud83dudd04 MONITORING complete")
+    #     except Exception as e:
+    #         logger.error(f"u274c Error in bot_loop_start monitoring: {e}", exc_info=True)

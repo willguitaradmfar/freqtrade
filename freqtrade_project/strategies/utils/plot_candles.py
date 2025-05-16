@@ -3,6 +3,7 @@ Plot the last N candles of a trading pair with indicators.
 """
 import os
 import logging
+import base64
 import pandas as pd
 import numpy as np
 import mplfinance as mpf
@@ -11,13 +12,34 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from datetime import datetime
 from PIL import Image
+from typing import Dict, Optional, Tuple, Union, Any
 
 # Configure logger
 logger = logging.getLogger(__name__)
 
+def encode_image_to_base64(image_path: str) -> Optional[str]:
+    """
+    Encode an image file to base64
+    
+    :param image_path: Path to the image file
+    :return: Base64 encoded string or None if encoding fails
+    """
+    try:
+        if not os.path.exists(image_path):
+            logger.error(f"Image file not found: {image_path}")
+            return None
+            
+        with open(image_path, "rb") as image_file:
+            encoded_string = base64.b64encode(image_file.read()).decode('utf-8')
+            return encoded_string
+    except Exception as e:
+        logger.error(f"Error encoding image to base64: {e}")
+        return None
+
 def plot_last_candles(pair, dataframe, timeframe, num_candles=30, output_dir="user_data/plot", 
                      indicators=None, indicators_below=None, save_format='png', use_plotly=False, 
-                     save_html=False, volume_spacing='none', title=None, subtitle=None):
+                     save_html=False, volume_spacing='none', title=None, subtitle=None, sulfix_filename=None, 
+                     question=None):
     """
     Plot the last N candles of a trading pair with indicators.
     
@@ -51,12 +73,16 @@ def plot_last_candles(pair, dataframe, timeframe, num_candles=30, output_dir="us
         Main title for the chart (default: None, will use pair-timeframe)
     subtitle : str, optional
         Subtitle for the chart (default: None)
-    
+    sulfix_filename : str, optional
+        Sulfix for the filename (default: None)    
+        
     Returns:
     --------
-    str
-        Path to the saved plot file, or None if plot failed
+    Union[Dict[str, Any], None]
+        Dictionary with keys 'filepath' (path to the saved image) and 'base64' (base64-encoded image),
+        or None if plot failed
     """
+    
     try:
         # Ensure the output directory exists
         os.makedirs(output_dir, exist_ok=True)
@@ -64,7 +90,10 @@ def plot_last_candles(pair, dataframe, timeframe, num_candles=30, output_dir="us
         # Prepare pair name for filename (replace / with _)
         safe_pair = pair.replace('/', '_')
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        filename = f"{safe_pair}_{timeframe}_{timestamp}.{save_format}"
+        if sulfix_filename:
+            filename = f"{safe_pair}_{timeframe}_{sulfix_filename}_{timestamp}.{save_format}"
+        else:
+            filename = f"{safe_pair}_{timeframe}_{timestamp}.{save_format}"
         filepath = os.path.join(output_dir, filename)
         
         # Copy the dataframe to avoid modifying the original
@@ -84,10 +113,32 @@ def plot_last_candles(pair, dataframe, timeframe, num_candles=30, output_dir="us
             logger.warning(f"No data available for {pair} in the specified timeframe")
             return None
             
+        # Generate the plot using the selected method
+        result_path = None
         if use_plotly:
-            return _plot_with_plotly(df, pair, timeframe, filepath, indicators, indicators_below, save_html, volume_spacing, title, subtitle)
+            result_path = _plot_with_plotly(df, pair, timeframe, filepath, indicators, indicators_below, save_html, volume_spacing, title, subtitle)
         else:
-            return _plot_with_mplfinance(df, pair, timeframe, filepath, indicators, indicators_below, volume_spacing, title, subtitle)
+            result_path = _plot_with_mplfinance(df, pair, timeframe, filepath, indicators, indicators_below, volume_spacing, title, subtitle)
+        
+        # If plotting succeeded, encode to base64
+        if result_path:
+            base64_image = encode_image_to_base64(result_path)
+            if base64_image:
+                logger.info(f"Successfully encoded image to base64: {result_path}")
+                return {
+                    "filepath": result_path,
+                    "base64": base64_image,
+                    "question": question
+                }
+            else:
+                logger.error(f"Failed to encode image to base64: {result_path}")
+                return {
+                    "filepath": result_path,
+                    "base64": None,
+                    "question": question
+                }
+        
+        return None
     
     except Exception as e:
         logger.error(f"Error plotting candles for {pair}: {e}", exc_info=True)

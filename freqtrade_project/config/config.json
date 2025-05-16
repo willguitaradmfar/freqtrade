@@ -1,6 +1,6 @@
 {
     "$schema": "https://schema.freqtrade.io/schema.json",
-    "max_open_trades": 3,
+    "max_open_trades": 10,
     "stake_currency": "USDT",
     "stake_amount": "unlimited",
     "tradable_balance_ratio": 0.99,
@@ -37,9 +37,14 @@
         "secret": "",
         "ccxt_config": {},
         "ccxt_async_config": {},
-        "pair_whitelist": ["BTC/USDT", "ETH/USDT", "BNB/USDT"],
+        "pair_whitelist": [
+            "BTC/USDT", 
+            "ETH/USDT", 
+            "BNB/USDT",
+            "XRP/USDT",
+            "DOGE/USDT"
+        ],
         "pair_blacklist": [
-            "BNB/.*"
         ]
     },
     "pairlists": [
