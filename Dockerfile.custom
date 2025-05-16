@@ -1,0 +1,4 @@
+FROM freqtradeorg/freqtrade:stable
+
+# Install only Python packages, avoiding system package installations
+RUN pip install openai matplotlib numpy pandas pillow mplfinance plotly

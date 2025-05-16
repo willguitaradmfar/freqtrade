@@ -1,0 +1,4 @@
+logs
+plot
+*.sqlite
+*.sqlite-*
