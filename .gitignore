@@ -2,3 +2,4 @@ logs
 plot
 *.sqlite
 *.sqlite-*
+.env

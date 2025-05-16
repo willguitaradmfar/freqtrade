@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 def plot_last_candles(pair, dataframe, timeframe, num_candles=30, output_dir="user_data/plot", 
                      indicators=None, indicators_below=None, save_format='png', use_plotly=False, 
-                     save_html=False, volume_spacing='auto', title=None, subtitle=None):
+                     save_html=False, volume_spacing='none', title=None, subtitle=None):
     """
     Plot the last N candles of a trading pair with indicators.
     
@@ -188,9 +188,9 @@ def _plot_with_mplfinance(df, pair, timeframe, filepath, indicators=None, indica
                         positive_data = df[ind['name']].copy()
                         negative_data = df[ind['name']].copy()
                         
-                        # Zerar valores opostos
+                        # Manter apenas os valores positivos/negativos
                         positive_data[positive_data <= 0] = float('nan')  # Remove negativos
-                        negative_data[negative_data > 0] = float('nan')   # Remove positivos
+                        negative_data[negative_data >= 0] = float('nan')  # Remove positivos
                         
                         # Cor positiva (verde ou a cor especificada)
                         apds.append(
@@ -200,7 +200,8 @@ def _plot_with_mplfinance(df, pair, timeframe, filepath, indicators=None, indica
                                 panel=0,
                                 type='bar',
                                 width=ind.get('width', 1.5),
-                                ylabel=ind['name']
+                                ylabel=ind['name'],
+                                secondary_y=True  # Usar a escala da direita
                             )
                         )
                         
@@ -211,7 +212,8 @@ def _plot_with_mplfinance(df, pair, timeframe, filepath, indicators=None, indica
                                 color=ind.get('negative_color', 'red'),  # Vermelho para negativos
                                 panel=0,
                                 type='bar',
-                                width=ind.get('width', 1.5)
+                                width=ind.get('width', 1.5),
+                                secondary_y=True  # Usar a escala da direita também
                             )
                         )
                 else:
@@ -280,9 +282,9 @@ def _plot_with_mplfinance(df, pair, timeframe, filepath, indicators=None, indica
                         positive_data = df[ind['name']].copy()
                         negative_data = df[ind['name']].copy()
                         
-                        # Zerar valores opostos
+                        # Manter apenas os valores positivos/negativos
                         positive_data[positive_data <= 0] = float('nan')  # Remove negativos
-                        negative_data[negative_data > 0] = float('nan')   # Remove positivos
+                        negative_data[negative_data >= 0] = float('nan')  # Remove positivos
                         
                         # Cor positiva (verde ou a cor especificada)
                         apds.append(
@@ -292,7 +294,8 @@ def _plot_with_mplfinance(df, pair, timeframe, filepath, indicators=None, indica
                                 panel=panel_num,
                                 type='bar',
                                 width=ind.get('width', 1.5),
-                                ylabel=panel_label
+                                ylabel=panel_label,
+                                secondary_y=True  # Usar a escala da direita
                             )
                         )
                         
@@ -303,7 +306,8 @@ def _plot_with_mplfinance(df, pair, timeframe, filepath, indicators=None, indica
                                 color=ind.get('negative_color', 'red'),  # Vermelho para negativos
                                 panel=panel_num,
                                 type='bar',
-                                width=ind.get('width', 1.5)
+                                width=ind.get('width', 1.5),
+                                secondary_y=True  # Usar a escala da direita também
                             )
                         )
             
@@ -425,7 +429,8 @@ def _plot_with_plotly(df, pair, timeframe, filepath, indicators=None, indicators
                 "",  # Deixaremos o título principal vazio para usar o título personalizado
                 "Volume",
                 *panel_titles  # Usar os títulos dos painéis
-            )
+            ),
+            specs=[[{"secondary_y": True}]] + [[{"secondary_y": False}]] + [[{"secondary_y": True}]] * panel_count  # Adicionar eixo secundário para o painel principal e indicadores
         )
         
         # Add candlestick trace
@@ -438,7 +443,7 @@ def _plot_with_plotly(df, pair, timeframe, filepath, indicators=None, indicators
                 close=df['close'],
                 name="Candles"
             ),
-            row=1, col=1
+            row=1, col=1, secondary_y=False
         )
         
         # Add volume trace with colors based on price direction
@@ -487,7 +492,7 @@ def _plot_with_plotly(df, pair, timeframe, filepath, indicators=None, indicators
                                 name=ind['name'],  # Use column name as legend label
                                 line=dict(color=ind['color'], width=ind.get('width', 1.5))
                             ),
-                            row=1, col=1
+                            row=1, col=1, secondary_y=False
                         )
                     elif plot_type == 'bar':
                         # Para barras com cores diferentes por valor (positivo/negativo)
@@ -495,22 +500,22 @@ def _plot_with_plotly(df, pair, timeframe, filepath, indicators=None, indicators
                         positive_data = df[ind['name']].copy()
                         negative_data = df[ind['name']].copy()
                         
-                        # Zerar valores opostos
+                        # Manter apenas os valores positivos/negativos
                         positive_data[positive_data <= 0] = float('nan')  # Remove negativos
-                        negative_data[negative_data > 0] = float('nan')   # Remove positivos
+                        negative_data[negative_data >= 0] = float('nan')  # Remove positivos
                         
                         # Cor positiva (verde ou a cor especificada)
                         fig.add_trace(
                             go.Bar(
                                 x=df.index,
                                 y=positive_data,
-                                name=ind['name'],
+                                name=ind['name'] + " (Positivo)",
                                 marker=dict(
                                     color=ind.get('positive_color', 'green') if 'positive_color' in ind else ind['color'],
                                     line=dict(width=0.5, color='white')
                                 )
                             ),
-                            row=1, col=1
+                            row=1, col=1, secondary_y=True
                         )
                         
                         # Cor negativa (vermelho para negativos)
@@ -518,13 +523,13 @@ def _plot_with_plotly(df, pair, timeframe, filepath, indicators=None, indicators
                             go.Bar(
                                 x=df.index,
                                 y=negative_data,
-                                name=ind['name'],
+                                name=ind['name'] + " (Negativo)",
                                 marker=dict(
                                     color=ind.get('negative_color', 'red'),  # Vermelho para negativos
                                     line=dict(width=0.5, color='white')
                                 )
                             ),
-                            row=1, col=1
+                            row=1, col=1, secondary_y=True
                         )
                 else:
                     logger.warning(f"Indicator {ind['name']} not found in dataframe columns")
@@ -554,7 +559,7 @@ def _plot_with_plotly(df, pair, timeframe, filepath, indicators=None, indicators
                                 name=ind['name'],
                                 line=dict(color=ind['color'], width=ind.get('width', 1.5))
                             ),
-                            row=panel_row, col=1
+                            row=panel_row, col=1, secondary_y=False
                         )
                     elif plot_type == 'bar':
                         # Para barras com cores diferentes por valor (positivo/negativo)
@@ -562,22 +567,22 @@ def _plot_with_plotly(df, pair, timeframe, filepath, indicators=None, indicators
                         positive_data = df[ind['name']].copy()
                         negative_data = df[ind['name']].copy()
                         
-                        # Zerar valores opostos
+                        # Manter apenas os valores positivos/negativos
                         positive_data[positive_data <= 0] = float('nan')  # Remove negativos
-                        negative_data[negative_data > 0] = float('nan')   # Remove positivos
+                        negative_data[negative_data >= 0] = float('nan')  # Remove positivos
                         
                         # Cor positiva (verde ou a cor especificada)
                         fig.add_trace(
                             go.Bar(
                                 x=df.index,
                                 y=positive_data,
-                                name=ind['name'],
+                                name=ind['name'] + " (Positivo)",
                                 marker=dict(
                                     color=ind.get('positive_color', 'green') if 'positive_color' in ind else ind['color'],
                                     line=dict(width=0.5, color='white')
                                 )
                             ),
-                            row=panel_row, col=1
+                            row=panel_row, col=1, secondary_y=True
                         )
                         
                         # Cor negativa (vermelho para negativos)
@@ -585,13 +590,13 @@ def _plot_with_plotly(df, pair, timeframe, filepath, indicators=None, indicators
                             go.Bar(
                                 x=df.index,
                                 y=negative_data,
-                                name=ind['name'],
+                                name=ind['name'] + " (Negativo)",
                                 marker=dict(
                                     color=ind.get('negative_color', 'red'),  # Vermelho para negativos
                                     line=dict(width=0.5, color='white')
                                 )
                             ),
-                            row=panel_row, col=1
+                            row=panel_row, col=1, secondary_y=True
                         )
                 
                 # Atualizar título do eixo y para este painel
@@ -604,7 +609,35 @@ def _plot_with_plotly(df, pair, timeframe, filepath, indicators=None, indicators
         # Increase vertical spacing and add border between panels
         for i in range(1, panel_count + 2):
             fig.update_xaxes(showgrid=True, gridcolor='lightgray', row=i, col=1)
-            fig.update_yaxes(showgrid=True, gridcolor='lightgray', row=i, col=1)
+            
+            if i == 1:  # Main panel (price + MACD)
+                # Eixo Y primário (esquerda) - Preço
+                fig.update_yaxes(
+                    title_text='Price', 
+                    showgrid=True, 
+                    gridcolor='lightgray',
+                    side='left',
+                    row=i, col=1,
+                    secondary_y=False
+                )
+                # Eixo Y secundário (direita) - MACD/Histograma
+                fig.update_yaxes(
+                    title_text='Indicator',
+                    showgrid=False,
+                    side='right', 
+                    row=i, col=1,
+                    secondary_y=True,
+                    fixedrange=False  # Permitir zoom
+                )
+            else:
+                # Configurar eixos Y para os outros painéis
+                fig.update_yaxes(
+                    showgrid=True, 
+                    gridcolor='lightgray', 
+                    row=i, col=1,
+                    side='left',  # Garantir que todos os eixos Y estejam à esquerda
+                    fixedrange=False  # Permitir zoom no eixo Y
+                )
         
         # Update layout with more height for multiple panels
         chart_title = title or f"{pair} - {timeframe}"

@@ -20,6 +20,9 @@ services:
       dockerfile: "./Dockerfile.custom"
     restart: unless-stopped
     container_name: freqtrade
+    # .env
+    env_file:
+      - .env
     volumes:
       - "./freqtrade_project:/freqtrade/user_data"
     # Expose api on port 8080 (localhost only)

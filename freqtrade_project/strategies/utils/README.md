@@ -2,6 +2,78 @@
 
 This directory contains utility modules for use with Freqtrade strategies.
 
+## LLM Client Module
+
+The `llm_client.py` module provides functionality to interact with OpenAI's language models (LLMs) for enhanced trading strategies.
+
+### Features
+
+- Send text and image messages to OpenAI models
+- Generate structured JSON responses for trading decisions
+- Support for multimodal inputs (text + images)
+- Error handling and logging
+- Compatible with various OpenAI models
+
+### Installation
+
+Install the required package:
+
+```bash
+pip install openai>=1.0.0
+```
+
+### Usage
+
+In your strategy, import and use the module:
+
+```python
+from utils.llm_client import LLMClient
+
+# Initialize the client with your API key
+llm_client = LLMClient(api_key="your_openai_api_key")
+
+# Example: Send messages to get market analysis
+response = llm_client.send_message(
+    messages=[
+        {"role": "system", "text": "You are a trading assistant."},
+        {"role": "user", "text": "Analyze this market data", "url_image": "https://example.com/chart.jpg"}
+    ],
+    model="gpt-4-vision-preview",
+    response_format={"type": "json_object"}
+)
+
+# Check if successful and use the response
+if response["success"]:
+    analysis = response["content"]
+    print(f"Market trend: {analysis['trend']}")
+    print(f"Recommendation: {analysis['recommendation']}")
+```
+
+### Parameters
+
+#### LLMClient.__init__
+- `api_key`: OpenAI API key (optional, can also use OPENAI_API_KEY environment variable)
+
+#### LLMClient.send_message
+- `messages`: List of message objects with:
+  - `role`: "system" or "user"
+  - `text`: The message content
+  - `url_image`: (Optional) URL to an image
+- `model`: OpenAI model to use (default: "gpt-4-turbo")
+- `temperature`: Controls randomness (0-1, default: 0.7)
+- `max_tokens`: Maximum response length (default: 1024)
+- `response_format`: Optional format specification, e.g. {"type": "json_object"}
+
+### Return Value
+
+The function returns a dictionary with:
+- `success`: Boolean indicating if the call was successful
+- `model`: The model used for the response
+- `content`: Parsed JSON content (if requested) or raw text
+- `raw_response`: The original text response
+- `tokens`: Token usage information
+- `error`: Error message if unsuccessful
+
 ## Plot Candles Module
 
 The `plot_candles.py` module provides functionality to generate candlestick charts with indicators for Freqtrade strategies.
