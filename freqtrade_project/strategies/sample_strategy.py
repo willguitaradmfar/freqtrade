@@ -45,6 +45,18 @@ try:
 except Exception as e:
     logger.error(f"Error importing LLM client module: {e}")
 
+# Safely import Discord webhook
+DISCORD_WEBHOOK_AVAILABLE = False
+try:
+    if os.path.exists(os.path.join(utils_dir, 'discord_webhook.py')):
+        from utils.discord_webhook import DiscordWebhook
+        DISCORD_WEBHOOK_AVAILABLE = True
+        logger.info("Discord webhook module loaded successfully")
+    else:
+        logger.warning("discord_webhook.py not found in utils directory")
+except Exception as e:
+    logger.error(f"Error importing Discord webhook module: {e}")
+
 class SampleStrategy(IStrategy):
     """
     Simple trading strategy that uses LLM analysis of chart images to make decisions
@@ -375,6 +387,38 @@ class SampleStrategy(IStrategy):
                     json.dump(json_data, json_file, indent=4)
                     
                 logger.info(f"✅ Analysis saved to JSON file: {json_file_path}")
+                
+                # STEP 11: Send analysis to Discord if webhook URL is configured
+                logger.info(f"🔄 STEP 11: Sending analysis to Discord")
+                try:
+                    # Get Discord webhook URL from config or environment
+                    discord_webhook_url = self.config.get('discord_webhook_url') or os.environ.get('DISCORD_WEBHOOK_URL')
+                    
+                    if discord_webhook_url and DISCORD_WEBHOOK_AVAILABLE:
+                        # Initialize Discord webhook client
+                        discord = DiscordWebhook(webhook_url=discord_webhook_url)
+                        
+                        # Send analysis to Discord
+                        result = discord.send_analysis(
+                            pair=pair,
+                            timeframe=self.timeframe,
+                            analysis_json_path=json_file_path,
+                            image_paths=image_paths,
+                            username=f"FreqTrade {self.__class__.__name__}"
+                        )
+                        
+                        if result and result.get('success'):
+                            logger.info(f"✅ Analysis sent to Discord successfully")
+                        else:
+                            logger.warning(f"⚠️ Failed to send analysis to Discord: {result.get('error', 'Unknown error')}")
+                    elif not discord_webhook_url:
+                        logger.info("ℹ️ Discord webhook URL not configured, skipping Discord integration")
+                    elif not DISCORD_WEBHOOK_AVAILABLE:
+                        logger.warning("⚠️ Discord webhook module not available, skipping Discord integration")
+                        
+                except Exception as e:
+                    logger.error(f"❌ Error sending analysis to Discord: {e}", exc_info=True)
+                    # Continue even if Discord sending fails
             except Exception as e:
                 logger.error(f"❌ Error saving LLM analysis to JSON file: {e}")
                 # Continue even if saving fails
@@ -387,7 +431,7 @@ class SampleStrategy(IStrategy):
             logger.info(f"   Recommendation: {content.get('recommendation')}")
             logger.info(f"   Stop Loss: {content.get('stop_loss')}%")
             logger.info(f"   Take Profit: {content.get('take_profit')}%")
-            logger.info(f"✅ STEP 11: Analysis validated and complete for {pair}")
+            logger.info(f"✅ STEP 12: Analysis validated and complete for {pair}")
                 
             return content
                 

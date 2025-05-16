@@ -155,4 +155,109 @@ The function generates and saves:
 2. An interactive HTML file (only when using plotly with save_html=True)
 
 The files are saved in the specified output directory with a filename pattern:
-`{pair}_{timeframe}_{timestamp}.{format}` 
+`{pair}_{timeframe}_{timestamp}.{format}`
+
+## Available Utilities
+
+### LLM Client
+The `LLMClient` class provides integration with OpenAI's API for trading analysis. It allows you to send messages to OpenAI's models and parse the responses.
+
+### Plot Candles
+The `plot_last_candles` function allows you to generate charts with various indicators.
+
+### Discord Webhook Integration
+The `DiscordWebhook` class provides integration with Discord's webhook API, allowing you to:
+
+- Send simple messages to Discord channels
+- Post trading analysis with chart images and LLM-generated insights
+- Customize username and avatar for each message
+
+#### Usage Example
+
+```python
+from freqtrade_project.strategies.utils import DiscordWebhook
+
+# Initialize the webhook client
+webhook = DiscordWebhook(webhook_url="https://discord.com/api/webhooks/your-webhook-url")
+
+# Send a simple message
+webhook.send_message(
+    content="Hello from FreqTrade!",
+    username="Trading Bot"
+)
+
+# Send trading analysis with images
+webhook.send_analysis(
+    pair="BTC/USDT",
+    timeframe="1h",
+    analysis_json_path="path/to/analysis.json",
+    image_paths=["path/to/chart1.png", "path/to/chart2.png"],
+    username="FreqTrade Analysis"
+)
+```
+
+#### Configuration
+You can set the webhook URL either directly in the constructor or via the `DISCORD_WEBHOOK_URL` environment variable:
+
+```bash
+export DISCORD_WEBHOOK_URL="https://discord.com/api/webhooks/your-webhook-url"
+```
+
+You can also configure the webhook URL in your FreqTrade strategy config file:
+
+```json
+{
+  "max_open_trades": 5,
+  "stake_currency": "USDT",
+  "stake_amount": 100,
+  "tradable_balance_ratio": 0.99,
+  "fiat_display_currency": "USD",
+  "dry_run": true,
+  "cancel_open_orders_on_exit": false,
+  "unfilledtimeout": {
+    "entry": 10,
+    "exit": 10,
+    "unit": "minutes"
+  },
+  "bid_strategy": {
+    "price_side": "ask",
+    "ask_last_balance": 0.0,
+    "use_order_book": false,
+    "order_book_top": 1,
+    "check_depth_of_market": {
+      "enabled": false,
+      "bids_to_ask_delta": 1
+    }
+  },
+  "ask_strategy": {
+    "price_side": "bid",
+    "bid_last_balance": 0.0,
+    "use_order_book": false,
+    "order_book_top": 1
+  },
+  
+  /* Discord Integration Configuration */
+  "discord_webhook_url": "https://discord.com/api/webhooks/your-webhook-url",
+  
+  "exchange": {
+    "name": "binance",
+    "key": "",
+    "secret": "",
+    "ccxt_config": {},
+    "ccxt_async_config": {},
+    "pair_whitelist": [
+      "BTC/USDT",
+      "ETH/USDT",
+      "BNB/USDT"
+    ],
+    "pair_blacklist": []
+  },
+  "pairlists": [
+    {"method": "StaticPairList"}
+  ],
+  "telegram": {
+    "enabled": false,
+    "token": "",
+    "chat_id": ""
+  }
+} 
