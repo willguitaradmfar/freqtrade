@@ -103,7 +103,8 @@ class DiscordWebhook:
                      analysis_json_path: str,
                      image_paths: List[str],
                      username: Optional[str] = "FreqTrade Analysis",
-                     avatar_url: Optional[str] = None) -> Dict[str, Any]:
+                     avatar_url: Optional[str] = None,
+                     open_trade_info: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
         Send trading analysis with images to Discord
         
@@ -113,6 +114,7 @@ class DiscordWebhook:
         :param image_paths: List of paths to chart images
         :param username: Override the webhook's default username
         :param avatar_url: Override the webhook's default avatar
+        :param open_trade_info: Information about any open trade for this pair (optional)
         
         :return: Dictionary with response details
         """
@@ -170,6 +172,45 @@ class DiscordWebhook:
         # Create a well-formatted Discord message with emojis and formatting
         content = f"# 📊 Trading Analysis: {pair} ({timeframe})\n\n"
         
+        # Add open trade information if available
+        if open_trade_info:
+            entry_price = open_trade_info.get('entry_price', 0)
+            current_price = open_trade_info.get('current_price', 0)
+            profit_pct = open_trade_info.get('profit_pct', 0)
+            time_in_trade = open_trade_info.get('time_in_trade', 0)
+            stop_loss_pct = open_trade_info.get('stop_loss_pct', 0)
+            take_profit_pct = open_trade_info.get('take_profit_pct', 0)
+            
+            # Choose profit emoji based on the current profit
+            profit_emoji = "🟢" if profit_pct > 0 else "🔴" if profit_pct < 0 else "⚪"
+            
+            content += f"## 💰 Posição Aberta\n"
+            content += f"Entrada: **{entry_price:.4f}**\n"
+            content += f"Atual: **{current_price:.4f}**\n"
+            content += f"Lucro/Prejuízo: {profit_emoji} **{profit_pct:.2f}%**\n"
+            content += f"Tempo na posição: **{time_in_trade:.1f}h**\n"
+            
+            if stop_loss_pct or take_profit_pct:
+                content += f"Stop Loss: **{stop_loss_pct:.2f}%** | Take Profit: **{take_profit_pct:.2f}%**\n"
+                
+                # Calculate distances to SL/TP if available
+                if entry_price and current_price:
+                    if stop_loss_pct:
+                        sl_price = entry_price * (1 + (stop_loss_pct / 100))
+                        sl_distance = ((current_price / sl_price) - 1) * 100
+                        content += f"Distância ao SL: **{sl_distance:.2f}%**\n"
+                        
+                    if take_profit_pct:
+                        tp_price = entry_price * (1 + (take_profit_pct / 100))
+                        tp_distance = ((tp_price / current_price) - 1) * 100
+                        content += f"Distância ao TP: **{tp_distance:.2f}%**\n"
+            
+            content += "\n"
+        else:
+            # Explicitly mention that there are no open trades
+            content += f"## 📝 Status da Posição\n"
+            content += "**Sem posição aberta** para este par no momento.\n\n"
+        
         # Add recommendation section (highlighted and with emoji)
         if isinstance(llm_content, dict):
             recommendation = llm_content.get('recommendation', '').lower()
@@ -178,12 +219,12 @@ class DiscordWebhook:
             # Add recommendation emoji based on the type
             rec_emoji = "🟢" if recommendation == 'buy' else "🔴" if recommendation == 'sell' else "🟡"
             
-            content += f"## {rec_emoji} Recommendation: **{recommendation.upper()}**\n"
-            content += f"Confidence: **{confidence:.2f}**\n\n"
+            content += f"## {rec_emoji} Recomendação: **{recommendation.upper()}**\n"
+            content += f"Confiança: **{confidence:.2f}**\n\n"
             
             # Add financial targets if available
             if 'stop_loss' in llm_content or 'take_profit' in llm_content:
-                content += "## 🎯 Trading Targets\n"
+                content += "## 🎯 Alvos de Trading\n"
                 if 'stop_loss' in llm_content:
                     content += f"Stop Loss: **{llm_content['stop_loss']}%**\n"
                 if 'take_profit' in llm_content:
@@ -194,19 +235,19 @@ class DiscordWebhook:
             if 'trend' in llm_content:
                 trend = llm_content['trend'].lower()
                 trend_emoji = "📈" if trend == 'bullish' else "📉" if trend == 'bearish' else "➡️"
-                content += f"## {trend_emoji} Market Trend: **{trend.upper()}**\n\n"
+                content += f"## {trend_emoji} Tendência: **{trend.upper()}**\n\n"
                 
             # Add detailed analysis
             if 'analysis' in llm_content:
-                content += f"## 📝 Analysis\n{llm_content['analysis'][:1500]}\n\n"
+                content += f"## 📝 Análise\n{llm_content['analysis'][:1500]}\n\n"
             elif 'summary' in llm_content:
-                content += f"## 📝 Summary\n{llm_content['summary'][:1500]}\n\n"
+                content += f"## 📝 Resumo\n{llm_content['summary'][:1500]}\n\n"
         else:
             # If it's not properly structured, use as is (truncated)
-            content += f"## 📝 Analysis\n{str(llm_content)[:1500]}\n\n"
+            content += f"## 📝 Análise\n{str(llm_content)[:1500]}\n\n"
             
         # Add timestamp
-        content += f"*Generated: {generation_time}*"
+        content += f"*Gerado em: {generation_time}*"
         
         # Prepare the multipart form data
         files = [

@@ -404,7 +404,8 @@ class SampleStrategy(IStrategy):
                             timeframe=self.timeframe,
                             analysis_json_path=json_file_path,
                             image_paths=image_paths,
-                            username=f"FreqTrade {self.__class__.__name__}"
+                            username=f"FreqTrade {self.__class__.__name__}",
+                            open_trade_info=self._get_open_trade_info(pair)
                         )
                         
                         if result and result.get('success'):
