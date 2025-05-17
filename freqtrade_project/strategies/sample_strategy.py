@@ -136,6 +136,25 @@ class SampleStrategy(IStrategy):
         )
         return dataframe
 
+    def calculate_vwap(self, dataframe: DataFrame, window: int = 20) -> DataFrame:
+        """Calculate Volume Weighted Average Price (VWAP) manually"""
+        # Make sure the dataframe has volume and typical price
+        if 'volume' not in dataframe.columns:
+            return dataframe
+            
+        # Calculate typical price: (high + low + close) / 3
+        if 'typical_price' not in dataframe.columns:
+            dataframe['typical_price'] = (dataframe['high'] + dataframe['low'] + dataframe['close']) / 3
+            
+        # Calculate VWAP
+        dataframe['vp'] = dataframe['typical_price'] * dataframe['volume']
+        dataframe['vwap'] = dataframe['vp'].rolling(window=window).sum() / dataframe['volume'].rolling(window=window).sum()
+        
+        # Clean up temporary columns
+        dataframe = dataframe.drop(columns=['vp', 'typical_price'], errors='ignore')
+        
+        return dataframe
+
     def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         """Calculate indicators and generate chart for analysis"""
         pair = metadata['pair']
@@ -145,6 +164,9 @@ class SampleStrategy(IStrategy):
         # Medias moveis exponenciais
         dataframe['ema_9'] = ta.EMA(dataframe, timeperiod=9)
         dataframe['ema_21'] = ta.EMA(dataframe, timeperiod=21)
+        
+        # Calculate VWAP manually instead of using ta.VWAP
+        dataframe = self.calculate_vwap(dataframe, window=20)
         
         # Calculate MACD - Fix: MACD returns tuple of arrays, not a dictionary
         macd, macdsignal, macdhist = ta.MACD(dataframe['close'])
@@ -207,9 +229,30 @@ class SampleStrategy(IStrategy):
                     subtitle=f"Bollinger Bands 20, 2 desvios padrao, Media Movel Exponencial 9 e 21, Convergence Divergence (MACD) e Relative Strength Index (RSI)",
                     question=f"What is the trend for {pair} in the {self.timeframe} timeframe? What is the trend for the Bollinger Bands?"
                 )
+
+                chart_vwap_result = plot_candles.plot_last_candles(
+                    pair=pair,
+                    sulfix_filename='vwap',
+                    dataframe=dataframe,
+                    timeframe=self.timeframe,
+                    num_candles=50,
+                    output_dir=self.absolute_plot_dir,
+                    indicators=[
+                        {'name': 'vwap', 'color': 'blue', 'panel': 0, 'width': 1.5, 'type': 'line'},
+                    ],
+                    indicators_below=[
+                        {'name': 'rsi', 'color': 'purple', 'width': 1.0, 'type': 'line'},
+                        {'name': 'macd', 'color': 'blue', 'width': 1.5, 'panel': 'MACD', 'type': 'line'},
+                        {'name': 'macdsignal', 'color': 'red', 'width': 1.0, 'panel': 'MACD', 'type': 'line'},
+                        {'name': 'macdhist', 'color': 'green', 'width': 0.8, 'panel': 'MACD', 'type': 'bar'},
+                    ],
+                    title=f"{pair} - {self.timeframe}",
+                    subtitle=f"Volume Weighted Average Price (VWAP) 20",
+                    question=f"What is the trend for {pair} in the {self.timeframe} timeframe? What is the trend for the VWAP?"
+                )
                 
                 # Get LLM analysis if charts were created and client is available
-                if (chart_emas_result or chart_bollinger_result) and self.llm_client and LLM_CLIENT_AVAILABLE:
+                if (chart_emas_result or chart_bollinger_result or chart_vwap_result) and self.llm_client and LLM_CLIENT_AVAILABLE:
                     # Create a list of all chart images to analyze
                     chart_images = []
                     chart_base64_images = []
@@ -235,6 +278,17 @@ class SampleStrategy(IStrategy):
                                     "question": chart_bollinger_result['question']
                                 })
                             logger.info(f"Bollinger chart generated: {chart_bollinger_result['filepath']}")
+
+                    if chart_vwap_result:
+                        if chart_vwap_result.get('filepath') and os.path.exists(chart_vwap_result['filepath']):
+                            chart_images.append(chart_vwap_result['filepath'])
+                            if chart_vwap_result.get('base64'):
+                                chart_base64_images.append({
+                                    "path": chart_vwap_result['filepath'],
+                                    "base64": chart_vwap_result['base64'],
+                                    "question": chart_vwap_result['question']
+                                })
+                            logger.info(f"VWAP chart generated: {chart_vwap_result['filepath']}")
                                 
                     if chart_images and chart_base64_images:
                         llm_analysis = self.analyze_chart_with_llm(chart_images, chart_base64_images, pair, dataframe)
@@ -280,8 +334,11 @@ class SampleStrategy(IStrategy):
             logger.info(f"🔄 STEP 5: Creating system message for LLM")
             system_content = (
                 "You are a cryptocurrency trading assistant. Analyze the chart images and provide "
-                "professional technical analysis. Your response must be a JSON object with the following fields: "
+                "professional technical analysis. You must analyze all indicators, candlestick patterns, and market structures. "
+                "Pay close attention to open orders and positions, profit levels, and make clear decisions on whether to sell or continue holding. "
+                "Your response must be a JSON object with the following fields: "
                 "\"analysis\": a brief explanation of your analysis with key indicators and patterns, "
+                "\"analysis_pt\": the Portuguese translation of your analysis, "
                 "\"trend\": \"bullish\", \"bearish\", or \"neutral\", "
                 "\"confidence\": a number between 0 and 1, "
                 "\"recommendation\": \"buy\", \"sell\", or \"hold\", "
@@ -304,7 +361,7 @@ class SampleStrategy(IStrategy):
                     f"- Stop loss set at: {trade_info['stop_loss_pct']}%\n"
                     f"- Take profit target: {trade_info['take_profit_pct']}%\n\n"
                 )
-                user_content += ("Based on the charts and current open position, provide your analysis and recommendation. "
+                user_content += ("Based on the charts, current open position, and open orders, provide your analysis and recommendation. "
                                 "If you recommend selling, explain why. If you recommend holding, explain for how much longer and what conditions would change your recommendation.")
             else:
                 user_content += ("No open position currently exists. Based on the charts, provide your analysis and recommendation. "

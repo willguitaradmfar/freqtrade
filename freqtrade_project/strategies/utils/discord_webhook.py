@@ -239,7 +239,7 @@ class DiscordWebhook:
                 
             # Add detailed analysis
             if 'analysis' in llm_content:
-                content += f"## 📝 Análise\n{llm_content['analysis'][:1500]}\n\n"
+                content += f"## 📝 Análise\n{llm_content['analysis_pt'][:1500]}\n\n"
             elif 'summary' in llm_content:
                 content += f"## 📝 Resumo\n{llm_content['summary'][:1500]}\n\n"
         else:
