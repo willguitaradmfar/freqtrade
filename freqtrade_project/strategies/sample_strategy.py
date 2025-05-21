@@ -65,11 +65,21 @@ class SampleStrategy(IStrategy):
     can_short = False
 
     # Default ROI and stoploss (will be overridden by LLM recommendations)
-    minimal_roi = {"0": 0.05}
-    stoploss = -0.10
+    minimal_roi = {
+        "0": 0.5,
+        "30": 0.025,
+        "60": 0.015,
+        "90": 0.01
+    }
+    # stoploss is a percentage of the entry price
+    # 0.02 is 2%
+    stoploss = -0.02
+    # trailing_stop_positive is a percentage of the entry price
+    # 0.01 is 1%
+    trailing_stop_positive = 0.01
 
     # No trailing stop by default
-    trailing_stop = False
+    trailing_stop = True
 
     # Trading timeframe
     timeframe = "30m"
@@ -78,7 +88,7 @@ class SampleStrategy(IStrategy):
     process_only_new_candles = True
 
     # Exit settings
-    use_exit_signal = True
+    use_exit_signal = True    
     exit_profit_only = False
     ignore_roi_if_entry_signal = False
 
@@ -90,7 +100,7 @@ class SampleStrategy(IStrategy):
         "entry": "limit",
         "exit": "limit",
         "stoploss": "market",
-        "stoploss_on_exchange": False,
+        "stoploss_on_exchange": True
     }
     order_time_in_force = {"entry": "GTC", "exit": "GTC"}
 
@@ -338,7 +348,6 @@ class SampleStrategy(IStrategy):
                 "Pay close attention to open orders and positions, profit levels, and make clear decisions on whether to sell or continue holding. "
                 "Your response must be a JSON object with the following fields: "
                 "\"analysis\": a brief explanation of your analysis with key indicators and patterns, "
-                "\"analysis_pt\": the Portuguese translation of your analysis, "
                 "\"trend\": \"bullish\", \"bearish\", or \"neutral\", "
                 "\"confidence\": a number between 0 and 1, "
                 "\"recommendation\": \"buy\", \"sell\", or \"hold\", "

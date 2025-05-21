@@ -1,11 +1,11 @@
 {
     "$schema": "https://schema.freqtrade.io/schema.json",
-    "max_open_trades": 10,
+    "max_open_trades": 5,
     "stake_currency": "USDT",
     "stake_amount": "unlimited",
     "tradable_balance_ratio": 0.99,
     "fiat_display_currency": "USD",
-    "dry_run": true,
+    "dry_run": false,
     "dry_run_wallet": 1000,
     "cancel_open_orders_on_exit": false,
     "trading_mode": "spot",
@@ -33,8 +33,8 @@
     },
     "exchange": {
         "name": "binance",
-        "key": "",
-        "secret": "",
+        "key": "pJ6gRwp8AhbLzTxG0jonelvXhHjpJGwbTj0ycVs09GQwkR62tFB2YEGnSAV1aMOX",
+        "secret": "9Hwo6E5TpZYzfw21qYXx9OxFjHKLEhlEByL2p6oQDFToYSvVnhNPaLaB5lKO8uW4",
         "ccxt_config": {},
         "ccxt_async_config": {},
         "pair_whitelist": [
