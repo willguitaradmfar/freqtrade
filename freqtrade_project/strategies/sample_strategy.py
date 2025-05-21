@@ -112,7 +112,7 @@ class SampleStrategy(IStrategy):
     # LLM settings
     llm_model = "gpt-4.1"
     llm_temperature = 0.7
-    llm_max_tokens = 1024
+    llm_max_tokens = 4096
 
     def __init__(self, config: dict) -> None:
         """Initialize the strategy"""
