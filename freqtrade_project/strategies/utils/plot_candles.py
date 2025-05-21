@@ -8,11 +8,15 @@ import pandas as pd
 import numpy as np
 import mplfinance as mpf
 import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
+from matplotlib.collections import PatchCollection
+from matplotlib.patches import Rectangle
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from datetime import datetime
+import json
 from PIL import Image
-from typing import Dict, Optional, Tuple, Union, Any
+from typing import Dict, Optional, Tuple, Union, Any, List
 
 # Configure logger
 logger = logging.getLogger(__name__)
@@ -267,6 +271,10 @@ def _plot_with_mplfinance(df, pair, timeframe, filepath, indicators=None, indica
                                 secondary_y=True  # Usar a escala da direita também
                             )
                         )
+                    elif plot_type == 'heatmap':
+                        # Heatmap plotting requires custom implementation below
+                        # We'll store the heatmap information to add after creating the plot
+                        pass
                 else:
                     logger.warning(f"Indicator {ind['name']} not found in dataframe columns")
         
@@ -407,7 +415,7 @@ def _plot_with_mplfinance(df, pair, timeframe, filepath, indicators=None, indica
             # Add main indicators to legend
             if indicators:
                 for ind in indicators:
-                    if ind['name'] in df.columns:
+                    if ind['name'] in df.columns and ind.get('type', 'line') != 'heatmap' and 'color' in ind:
                         from matplotlib.lines import Line2D
                         legend_elements.append(
                             Line2D([0], [0], color=ind['color'], lw=ind.get('width', 1.5), label=ind['name'])
@@ -416,14 +424,89 @@ def _plot_with_mplfinance(df, pair, timeframe, filepath, indicators=None, indica
             # Add indicators_below to legend
             if indicators_below:
                 for ind in indicators_below:
-                    if ind['name'] in df.columns:
+                    if ind['name'] in df.columns and ind.get('type', 'line') != 'heatmap' and 'color' in ind:
                         from matplotlib.lines import Line2D
                         legend_elements.append(
                             Line2D([0], [0], color=ind['color'], lw=ind.get('width', 1.5), label=ind['name'])
                         )
             
-            main_panel.legend(handles=legend_elements, loc='upper left')
+            if legend_elements:
+                main_panel.legend(handles=legend_elements, loc='upper left')
             
+        # Now add custom heatmap if requested
+        if indicators:
+            for ind in indicators:
+                if ind.get('type') == 'heatmap' and ind['name'] in df.columns:
+                    try:
+                        # Get the panel to draw the heatmap on
+                        panel_num = ind.get('panel', 0)
+                        panel = axes[panel_num]
+                        
+                        # Get the axes limits
+                        x_min, x_max = panel.get_xlim()
+                        y_min, y_max = panel.get_ylim()
+                        
+                        # Process last valid row with heatmap data
+                        last_idx = len(df) - 1
+                        while last_idx >= 0:
+                            if pd.notna(df[ind['name']].iloc[last_idx]):
+                                break
+                            last_idx -= 1
+                        
+                        if last_idx >= 0 and pd.notna(df[ind['name']].iloc[last_idx]):
+                            # Parse the heatmap data
+                            try:
+                                heatmap_data = eval(df[ind['name']].iloc[last_idx])
+                                if isinstance(heatmap_data, list) and len(heatmap_data) > 0:
+                                    # Extract price levels and intensity values
+                                    price_levels = [item[0] for item in heatmap_data]
+                                    intensity_values = [item[1] for item in heatmap_data]
+                                    
+                                    # Calculate height of each rectangle
+                                    if len(price_levels) >= 2:
+                                        height = (max(price_levels) - min(price_levels)) / (len(price_levels) - 1)
+                                    else:
+                                        height = (y_max - y_min) * 0.02
+                                    
+                                    # Create a colormap (hot_r for intensity)
+                                    cmap = plt.cm.get_cmap('hot_r')
+                                    
+                                    # Get x coordinates for creating horizontal bars across the entire chart
+                                    xmin = x_min
+                                    xmax = x_max
+                                    width = xmax - xmin
+                                    
+                                    # Draw horizontal bars across the entire chart for each price level
+                                    for i, (price, intensity) in enumerate(zip(price_levels, intensity_values)):
+                                        # Calculate color based on intensity
+                                        color = cmap(intensity)
+                                        # Create rectangle with transparency (alpha) to see candles through it
+                                        rect = plt.Rectangle(
+                                            (xmin, price - height/2),  # Lower left corner position
+                                            width,                     # Width (full chart width)
+                                            height,                    # Height (based on price level spacing)
+                                            color=color,
+                                            alpha=0.3,                # Make it transparent
+                                            linewidth=0,              # No outline
+                                            zorder=0                  # Place behind candles
+                                        )
+                                        panel.add_patch(rect)
+                                    
+                                    # Add a small legend explaining heatmap colors in text only, no colorbar
+                                    text_x = x_min + width * 0.02
+                                    text_y = y_min + (y_max - y_min) * 0.03
+                                    panel.text(
+                                        text_x, text_y, 
+                                        "Heat levels: Bright = High Volume/Price Activity", 
+                                        fontsize=8, 
+                                        alpha=0.7,
+                                        bbox=dict(facecolor='white', alpha=0.7, edgecolor='none')
+                                    )
+                            except Exception as e:
+                                logger.error(f"Error parsing heatmap data: {e}")
+                    except Exception as e:
+                        logger.error(f"Error adding heatmap to plot: {e}")
+        
         # Save the figure
         fig.savefig(filepath, dpi=300, bbox_inches='tight')
         plt.close(fig)
@@ -582,6 +665,66 @@ def _plot_with_plotly(df, pair, timeframe, filepath, indicators=None, indicators
                             ),
                             row=1, col=1, secondary_y=True
                         )
+                    elif plot_type == 'heatmap':
+                        # Get last row with valid heatmap data
+                        last_idx = len(df) - 1
+                        while last_idx >= 0:
+                            if pd.notna(df[ind['name']].iloc[last_idx]):
+                                break
+                            last_idx -= 1
+                        
+                        if last_idx >= 0 and pd.notna(df[ind['name']].iloc[last_idx]):
+                            try:
+                                # Parse the heatmap data
+                                heatmap_data = eval(df[ind['name']].iloc[last_idx])
+                                if isinstance(heatmap_data, list) and len(heatmap_data) > 0:
+                                    # Extract price levels and intensity values
+                                    price_levels = [item[0] for item in heatmap_data]
+                                    intensity_values = [item[1] for item in heatmap_data]
+                                    
+                                    # Add horizontal rectangles for each price level
+                                    for price, intensity in zip(price_levels, intensity_values):
+                                        # Skip if intensity is too low (reduces visual clutter)
+                                        if intensity < 0.1:  
+                                            continue
+                                            
+                                        # Calculate height of the bar
+                                        if len(price_levels) >= 2:
+                                            height = (max(price_levels) - min(price_levels)) / (len(price_levels) - 1)
+                                        else:
+                                            height = (price * 0.001)  # Default height if can't calculate
+                                        
+                                        # Calculate color from hot_r colormap
+                                        # Convert intensity (0-1) to a color in the hot_r scale
+                                        r = min(1.0, intensity * 2)
+                                        g = max(0, min(1.0, intensity * 1.5 - 0.2))
+                                        b = max(0, min(0.8, intensity - 0.6))
+                                        
+                                        # Add a rectangle shape for this price level
+                                        fig.add_shape(
+                                            type="rect",
+                                            x0=df.index[0],              # Start from the left of the chart
+                                            x1=df.index[-1],             # End at the right of the chart
+                                            y0=price - height/2,         # Bottom of the bar
+                                            y1=price + height/2,         # Top of the bar
+                                            fillcolor=f"rgba({int(r*255)},{int(g*255)},{int(b*255)},0.3)",  # With transparency
+                                            line=dict(width=0),
+                                            layer="below",               # Place behind the candles
+                                            row=1, col=1
+                                        )
+                                    
+                                    # Add an annotation explaining the heatmap
+                                    fig.add_annotation(
+                                        x=df.index[int(len(df)/4)],  # Quarter way through the chart
+                                        y=min(price_levels),          # Near the bottom of price range
+                                        text="Heat levels: Bright = High Volume/Price Activity",
+                                        showarrow=False,
+                                        bgcolor="rgba(255,255,255,0.5)",
+                                        font=dict(size=10),
+                                        row=1, col=1
+                                    )
+                            except Exception as e:
+                                logger.error(f"Error adding heatmap to plotly plot: {e}")
                 else:
                     logger.warning(f"Indicator {ind['name']} not found in dataframe columns")
         

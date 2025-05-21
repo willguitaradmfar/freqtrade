@@ -8,6 +8,8 @@ import logging
 from datetime import datetime
 import json
 from typing import Dict, List, Optional, Any
+import numpy as np
+import pandas as pd
 
 from freqtrade.strategy import IStrategy
 from freqtrade.persistence import Trade
@@ -165,6 +167,128 @@ class SampleStrategy(IStrategy):
         
         return dataframe
 
+    def calculate_volume_price_heatmap(self, dataframe: DataFrame, bins: int = 20, window: int = 14) -> DataFrame:
+        """
+        Calculate a heatmap showing where the money is concentrated based on volume and price amplitude.
+        Adds a 'volume_price_heatmap' column to the dataframe.
+        
+        Parameters:
+        -----------
+        dataframe : DataFrame
+            DataFrame containing OHLCV data
+        bins : int, optional
+            Number of price bins to divide the price range into (default: 20)
+        window : int, optional
+            Rolling window size for calculating the heatmap intensity (default: 14)
+            
+        Returns:
+        --------
+        DataFrame
+            The input dataframe with added 'price_bin_centers', 'price_bin_values', and 'volume_price_intensity' columns
+        """
+        try:
+            # Make a copy of the dataframe to avoid modifying the original
+            df = dataframe.copy()
+            
+            # Calculate price amplitude (high - low) for each candle
+            df['price_amplitude'] = df['high'] - df['low']
+            
+            # Calculate typical price (média do OHLC)
+            df['typical_price'] = (df['open'] + df['high'] + df['low'] + df['close']) / 4
+            
+            # Calculate volume * price amplitude as money intensity
+            df['money_intensity'] = df['volume'] * df['price_amplitude']
+            
+            # Create a rolling window for recent price range
+            recent_min = df['low'].rolling(window=window).min()
+            recent_max = df['high'].rolling(window=window).max()
+            
+            # Initialize arrays to hold the heatmap data - explicitly set as object dtypes
+            df['price_bin_centers'] = pd.Series(index=df.index, dtype='object')
+            df['price_bin_values'] = pd.Series(index=df.index, dtype='object')
+            df['volume_price_intensity'] = pd.Series(index=df.index, dtype='object')
+            
+            # For each row in the active calculation range (after the window)
+            for i in range(window, len(df)):
+                if np.isnan(recent_min[i]) or np.isnan(recent_max[i]):
+                    continue
+                    
+                # Define price range for this window
+                price_min = recent_min[i]
+                price_max = recent_max[i]
+                
+                # Avoid division by zero
+                if price_max <= price_min:
+                    price_max = price_min * 1.001  # Add a small buffer
+                    
+                # Create price bins
+                price_bins = np.linspace(price_min, price_max, bins + 1)
+                price_bin_centers = (price_bins[:-1] + price_bins[1:]) / 2
+                
+                # Initialize bin values
+                bin_values = np.zeros(bins)
+                
+                # Get relevant data window
+                window_data = df.iloc[i-window+1:i+1]
+                
+                # For each candle in window, distribute money intensity across price range
+                for _, candle in window_data.iterrows():
+                    # Find which bins this candle's price range covers
+                    low_idx = np.searchsorted(price_bins, candle['low']) - 1
+                    high_idx = np.searchsorted(price_bins, candle['high'])
+                    
+                    # Find the bin where the typical price falls
+                    typical_idx = np.searchsorted(price_bins, candle['typical_price']) - 1
+                    
+                    # Keep indices within valid range
+                    low_idx = max(0, low_idx)
+                    high_idx = min(bins, high_idx)
+                    typical_idx = max(0, min(bins-1, typical_idx))
+                    
+                    # Skip if invalid range
+                    if high_idx <= low_idx:
+                        continue
+                        
+                    # Calculate covered price range
+                    covered_range = price_bins[high_idx] - price_bins[low_idx]
+                    
+                    # Avoid division by zero
+                    if covered_range <= 0:
+                        continue
+                        
+                    # Distribute money intensity proportionally to bins
+                    base_intensity = candle['money_intensity'] / (high_idx - low_idx)
+                    
+                    # Add base intensity to each covered bin
+                    for j in range(low_idx, high_idx):
+                        # Add base intensity to all bins in the range
+                        bin_values[j] += base_intensity * 0.7  # 70% of intensity distributed equally
+                        
+                        # If this is the bin containing the typical price, add extra weight
+                        if j == typical_idx:
+                            # Add extra 30% to the typical price bin
+                            bin_values[j] += base_intensity * 0.3
+                
+                # Normalize bin values (0 to 1)
+                if np.max(bin_values) > 0:
+                    bin_values = bin_values / np.max(bin_values)
+                
+                # Store the results in the dataframe
+                df.at[i, 'price_bin_centers'] = str(price_bin_centers.tolist())
+                df.at[i, 'price_bin_values'] = str(bin_values.tolist())
+                df.at[i, 'volume_price_intensity'] = str(list(zip(price_bin_centers.tolist(), bin_values.tolist())))
+            
+            # Copy the calculated columns back to the original dataframe
+            dataframe['price_bin_centers'] = df['price_bin_centers'].copy()
+            dataframe['price_bin_values'] = df['price_bin_values'].copy()
+            dataframe['volume_price_intensity'] = df['volume_price_intensity'].copy()
+                    
+            return dataframe
+            
+        except Exception as e:
+            logger.error(f"Error calculating volume-price heatmap: {e}", exc_info=True)
+            return dataframe
+
     def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         """Calculate indicators and generate chart for analysis"""
         pair = metadata['pair']
@@ -187,9 +311,14 @@ class SampleStrategy(IStrategy):
         # Bollinger Bands
         dataframe = self.bollinger_bands(dataframe)
         
+        # Calculate volume-price heatmap
+        dataframe = self.calculate_volume_price_heatmap(dataframe, bins=20, window=50)
+        
         # Generate chart image for LLM analysis
         chart_emas_result = None
         chart_bollinger_result = None
+        chart_vwap_result = None
+        chart_heatmap_result = None
         if self.process_only_new_candles and not dataframe.empty and PLOT_CANDLES_AVAILABLE:
             try:
                 logger.info(f"Generating chart for {pair}")
@@ -239,7 +368,8 @@ class SampleStrategy(IStrategy):
                     subtitle=f"Bollinger Bands 20, 2 desvios padrao, Media Movel Exponencial 9 e 21, Convergence Divergence (MACD) e Relative Strength Index (RSI)",
                     question=f"What is the trend for {pair} in the {self.timeframe} timeframe? What is the trend for the Bollinger Bands?"
                 )
-
+                
+                # Plot VWAP chart
                 chart_vwap_result = plot_candles.plot_last_candles(
                     pair=pair,
                     sulfix_filename='vwap',
@@ -251,18 +381,34 @@ class SampleStrategy(IStrategy):
                         {'name': 'vwap', 'color': 'blue', 'panel': 0, 'width': 1.5, 'type': 'line'},
                     ],
                     indicators_below=[
-                        {'name': 'rsi', 'color': 'purple', 'width': 1.0, 'type': 'line'},
-                        {'name': 'macd', 'color': 'blue', 'width': 1.5, 'panel': 'MACD', 'type': 'line'},
-                        {'name': 'macdsignal', 'color': 'red', 'width': 1.0, 'panel': 'MACD', 'type': 'line'},
-                        {'name': 'macdhist', 'color': 'green', 'width': 0.8, 'panel': 'MACD', 'type': 'bar'},
+                        {'name': 'rsi', 'color': 'purple', 'width': 1.0, 'type': 'line'}
                     ],
-                    title=f"{pair} - {self.timeframe}",
+                    title=f"{pair} - {self.timeframe} - VWAP",
                     subtitle=f"Volume Weighted Average Price (VWAP) 20",
                     question=f"What is the trend for {pair} in the {self.timeframe} timeframe? What is the trend for the VWAP?"
                 )
                 
+                # Plot heatmap chart
+                chart_heatmap_result = plot_candles.plot_last_candles(
+                    pair=pair,
+                    sulfix_filename='heatmap',
+                    dataframe=dataframe,
+                    timeframe=self.timeframe,
+                    num_candles=50,
+                    output_dir=self.absolute_plot_dir,
+                    indicators=[
+                        {'name': 'ema_9', 'color': 'red', 'panel': 0, 'width': 1.5, 'type': 'line'},
+                        {'name': 'ema_21', 'color': 'blue', 'panel': 0, 'width': 1.5, 'type': 'line'},
+                        {'name': 'volume_price_intensity', 'panel': 0, 'type': 'heatmap'},
+                    ],
+                    indicators_below=[],
+                    title=f"{pair} - {self.timeframe} - Volume-Price Heatmap",
+                    subtitle=f"Heatmap showing where the money is concentrated based on volume and price amplitude",
+                    question=f"Where is the money concentrated in {pair} price levels? Which price levels have the highest volume and price activity? Please identify the most important price ranges from the heatmap and sort them by significance (from most to least important). Compare these key price levels with the current price and indicate if the price is currently trading within, above, or below these significant zones."
+                )
+                
                 # Get LLM analysis if charts were created and client is available
-                if (chart_emas_result or chart_bollinger_result or chart_vwap_result) and self.llm_client and LLM_CLIENT_AVAILABLE:
+                if (chart_emas_result or chart_bollinger_result or chart_vwap_result or chart_heatmap_result) and self.llm_client and LLM_CLIENT_AVAILABLE:
                     # Create a list of all chart images to analyze
                     chart_images = []
                     chart_base64_images = []
@@ -299,6 +445,17 @@ class SampleStrategy(IStrategy):
                                     "question": chart_vwap_result['question']
                                 })
                             logger.info(f"VWAP chart generated: {chart_vwap_result['filepath']}")
+
+                    if chart_heatmap_result:
+                        if chart_heatmap_result.get('filepath') and os.path.exists(chart_heatmap_result['filepath']):
+                            chart_images.append(chart_heatmap_result['filepath'])
+                            if chart_heatmap_result.get('base64'):
+                                chart_base64_images.append({
+                                    "path": chart_heatmap_result['filepath'],
+                                    "base64": chart_heatmap_result['base64'],
+                                    "question": chart_heatmap_result['question']
+                                })
+                            logger.info(f"Heatmap chart generated: {chart_heatmap_result['filepath']}")
                                 
                     if chart_images and chart_base64_images:
                         llm_analysis = self.analyze_chart_with_llm(chart_images, chart_base64_images, pair, dataframe)
