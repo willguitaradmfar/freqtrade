@@ -239,12 +239,12 @@ class DiscordWebhook:
                 
             # Add detailed analysis
             if 'analysis' in llm_content:
-                content += f"## 📝 Análise\n{llm_content['analysis'][:1500]}\n\n"
+                content += f"## 📝 Análise\n{llm_content['analysis'][:3000]}\n\n"
             elif 'summary' in llm_content:
-                content += f"## 📝 Resumo\n{llm_content['summary'][:1500]}\n\n"
+                content += f"## 📝 Resumo\n{llm_content['summary'][:3000]}\n\n"
         else:
             # If it's not properly structured, use as is (truncated)
-            content += f"## 📝 Análise\n{str(llm_content)[:1500]}\n\n"
+            content += f"## 📝 Análise\n{str(llm_content)[:3000]}\n\n"
             
         # Add timestamp
         content += f"*Gerado em: {generation_time}*"
