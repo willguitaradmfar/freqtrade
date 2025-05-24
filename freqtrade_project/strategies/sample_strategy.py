@@ -163,6 +163,25 @@ class SampleStrategy(IStrategy):
         
         # Dictionary to store custom stop loss and take profit values
         self.custom_sl_tp = {}
+        
+        # Path to LLM system prompt file
+        self.llm_prompt_file = os.path.join(config['user_data_dir'], 'config', 'llm_system_prompt.md')
+
+    def load_llm_system_prompt(self) -> str:
+        """Load the LLM system prompt from markdown file"""
+        with open(self.llm_prompt_file, 'r', encoding='utf-8') as f:
+            content = f.read()
+            # Remove markdown formatting for plain text prompt
+            import re
+            # Remove headers (##, ###, etc.)
+            content = re.sub(r'^#+\s+', '', content, flags=re.MULTILINE)
+            # Remove bold markers (**)
+            content = re.sub(r'\*\*(.*?)\*\*', r'\1', content)
+            # Remove bullet points (- )
+            content = re.sub(r'^-\s+', '', content, flags=re.MULTILINE)
+            # Clean up extra whitespace
+            content = re.sub(r'\n\s*\n', '\n\n', content)
+            return content.strip()
 
     def log_formatted(self, 
                      pair: str, 
@@ -578,22 +597,10 @@ class SampleStrategy(IStrategy):
             trade_info = self._get_open_trade_info(pair)
             self.log_formatted(pair, LogPhase.LLM_ANALYSIS, "DEBUG", f"Trade info: {trade_info}")
             
-            # System message for LLM
-            self.log_formatted(pair, LogPhase.LLM_ANALYSIS, "INFO", "STEP 5: Creating system message for LLM", IconType.ROBOT)
-            system_content = (
-                "You are a cryptocurrency trading assistant. Analyze the chart images and provide "
-                "professional technical analysis. You must analyze all indicators, candlestick patterns, and market structures. "
-                "You can recommend \"hold\" while adjusting stop_loss and take_profit levels as needed - evaluate risk and opportunity to modify these values based on current market conditions."
-                "Consider volatility and price amplitude when determining better take_profit and stop_loss values - you are a high-frequency trader. "
-                "Pay close attention to open orders and positions, profit levels, and make clear decisions on whether to sell or continue holding. "
-                "Your response must be a JSON object with the following fields: "
-                "\"analysis\": a brief explanation of your analysis with key indicators and patterns, "
-                "\"trend\": \"bullish\", \"bearish\", or \"neutral\", "
-                "\"confidence\": a number between 0 and 1, "
-                "\"recommendation\": \"buy\", \"sell\", or \"hold\", "
-                "\"stop_loss\": a suggested stop-loss percentage (negative value), "
-                "\"take_profit\": a suggested take-profit percentage (positive value)"
-            )
+            # System message for LLM - Load from markdown file
+            self.log_formatted(pair, LogPhase.LLM_ANALYSIS, "INFO", "STEP 5: Loading system message from markdown file", IconType.ROBOT)
+            system_content = self.load_llm_system_prompt()
+            self.log_formatted(pair, LogPhase.LLM_ANALYSIS, "DEBUG", f"System prompt loaded: {len(system_content)} characters")
             
             # User message with chart and trade context
             self.log_formatted(pair, LogPhase.LLM_ANALYSIS, "INFO", "STEP 6: Creating user message with charts", IconType.CHART)

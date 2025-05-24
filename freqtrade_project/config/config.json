@@ -33,8 +33,8 @@
     },
     "exchange": {
         "name": "binance",
-        "key": "pJ6gRwp8AhbLzTxG0jonelvXhHjpJGwbTj0ycVs09GQwkR62tFB2YEGnSAV1aMOX",
-        "secret": "9Hwo6E5TpZYzfw21qYXx9OxFjHKLEhlEByL2p6oQDFToYSvVnhNPaLaB5lKO8uW4",
+        "key": "",
+        "secret": "",
         "ccxt_config": {},
         "ccxt_async_config": {},
         "pair_whitelist": [
@@ -63,8 +63,8 @@
         "listen_port": 8080,
         "verbosity": "error",
         "enable_openapi": false,
-        "jwt_secret_key": "d5c9f3109b86debf92570b7234098fcd2d9601b43db5e4d8232130405edd2bb7",
-        "ws_token": "uXnukCEsZx2RBOKZS48ksNbHSI1twBsXTw",
+        "jwt_secret_key": "",
+        "ws_token": "",
         "CORS_origins": [],
         "username": "will",
         "password": "will"
